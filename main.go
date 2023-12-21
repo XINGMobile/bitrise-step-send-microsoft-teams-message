@@ -158,6 +158,9 @@ func newMessage(c Config) Message {
 	}
 	fmt.Printf("Resolved fields: %s\n", fields)
 
+	buttons, _ := resolveSubshellCommands(c.Buttons)
+	buttonsOnError, _ := resolveSubshellCommands(c.ButtonsOnError)
+
 	msg := Message{
 		Context:    "https://schema.org/extension",
 		Type:       "MessageCard",
@@ -169,7 +172,7 @@ func newMessage(c Config) Message {
 			ActivityText:  ensureNewlines(subject),
 			Facts:         parsesFacts(fields),
 			Images:        parsesImages(selectValue(c.Images, c.ImagesOnError)),
-			Actions:       parsesActions(selectValue(c.Buttons, c.ButtonsOnError)),
+			Actions:       parsesActions(selectValue(buttons, buttonsOnError)),
 		}},
 	}
 
