@@ -148,7 +148,7 @@ func newMessage(c Config) Message {
 	fmt.Printf("Found author: %s\n", author)
 
 	title, _ := resolveSubshellCommands(c.Title)//determineMessageValue(c.Title)
-	titleOnError := determineMessageValue(c.TitleOnError)
+	titleOnError := resolveSubshellCommands(c.TitleOnError)
 
 	subject, _ := resolveSubshellCommands(c.Subject)
 
