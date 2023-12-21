@@ -152,7 +152,11 @@ func newMessage(c Config) Message {
 
 	subject, _ := resolveSubshellCommands(c.Subject)
 
-	fields, _ := resolveSubshellCommands(c.Fields)
+	fields, err := resolveSubshellCommands(c.Fields)
+	if err != nil {
+		fmt.Printf("Error parsing fields string: %s\n", err)
+	}
+	fmt.Printf("Resolved fields: %s\n", fields)
 
 	msg := Message{
 		Context:    "https://schema.org/extension",
