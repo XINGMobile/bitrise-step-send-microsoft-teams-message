@@ -31,8 +31,10 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"os/exec"
 	"os"
 	"strings"
+	"regexp"
 
 	"github.com/bitrise-io/go-utils/log"
 	"github.com/bitrise-tools/go-steputils/stepconf"
@@ -75,19 +77,102 @@ func ensureNewlines(s string) string {
 	return strings.Replace(s, "\\n", "\n", -1)
 }
 
+func runShellCommand(cli_command string) (string, error) {
+	args := strings.Fields(cli_command)
+	cmd := exec.Command(args[0], args[1:]...)
+
+	// Set the working directory
+	cmd.Dir = "."
+
+	// Run the command
+	output, err := cmd.CombinedOutput()
+	// Idea, on error, always fallback to given value
+	if err != nil {
+		fmt.Printf("Error: %s with output: %s\n", err, output)
+		return "", err
+	}
+
+	// Print the output
+	fmt.Println(string(output))
+	return string(output), nil
+}
+
+// extractCommand extracts the command and its flags from a string
+// that contains subshell syntax like '"$(command)"'.
+func extractCommand(input string) string {
+	// Trim the leading and trailing quotes
+	trimmed := strings.Trim(input, `'"`)
+
+	// Remove the subshell syntax '$(...)'
+	return strings.TrimPrefix(strings.TrimSuffix(trimmed, ")"), "$(")
+}
+
+func determineMessageValue(given_value string) string {
+	if strings.HasPrefix(given_value, "$(") && strings.HasSuffix(given_value, ")") {
+		shell_cmd := extractCommand(given_value)
+		value, _ := runShellCommand(shell_cmd)
+		return value
+	} else {
+		return given_value
+	}
+}
+
+// resolveSubshellCommands finds and executes subshell commands in a string.
+func resolveSubshellCommands(input string) (string, error) {
+	// Regular expression to find subshell command patterns
+	re := regexp.MustCompile(`\$\((.*?)\)`)
+
+	// Find all matches
+	matches := re.FindAllStringSubmatch(input, -1)
+
+	for _, match := range matches {
+		fullMatch := match[0]
+		command := match[1]
+
+		// Run the subshell command
+		output, err := runShellCommand(command)
+		if err != nil {
+			return "", err
+		}
+
+		// Replace the subshell command in the original string with its output
+		input = strings.Replace(input, fullMatch, strings.TrimSpace(output), 1)
+	}
+
+	return input, nil
+}
+
 func newMessage(c Config) Message {
+	fmt.Printf("Config: %s\n", c)
+	author, _ := resolveSubshellCommands(c.AuthorName)
+	fmt.Printf("Found author: %s\n", author)
+
+	title, _ := resolveSubshellCommands(c.Title)//determineMessageValue(c.Title)
+	titleOnError, _ := resolveSubshellCommands(c.TitleOnError)
+
+	subject, _ := resolveSubshellCommands(c.Subject)
+
+	fields, err := resolveSubshellCommands(c.Fields)
+	if err != nil {
+		fmt.Printf("Error parsing fields string: %s\n", err)
+	}
+	fmt.Printf("Resolved fields: %s\n", fields)
+
+	buttons, _ := resolveSubshellCommands(c.Buttons)
+	buttonsOnError, _ := resolveSubshellCommands(c.ButtonsOnError)
+
 	msg := Message{
 		Context:    "https://schema.org/extension",
 		Type:       "MessageCard",
 		ThemeColor: selectValue(c.ThemeColor, c.ThemeColorOnError),
-		Title:      selectValue(c.Title, c.TitleOnError),
+		Title:      selectValue(title, titleOnError),
 		Summary:    "Result of Bitrise",
 		Sections: []Section{{
-			ActivityTitle: c.AuthorName,
-			ActivityText:  ensureNewlines(c.Subject),
-			Facts:         parsesFacts(c.Fields),
+			ActivityTitle: author,
+			ActivityText:  ensureNewlines(subject),
+			Facts:         parsesFacts(fields),
 			Images:        parsesImages(selectValue(c.Images, c.ImagesOnError)),
-			Actions:       parsesActions(selectValue(c.Buttons, c.ButtonsOnError)),
+			Actions:       parsesActions(selectValue(buttons, buttonsOnError)),
 		}},
 	}
 
@@ -102,7 +187,7 @@ func postMessage(conf Config, msg Message) error {
 	}
 	log.Debugf("Post Json Data: %s\n", b)
 
-	url := string(conf.WebhookURL)
+	url := determineMessageValue(string(conf.WebhookURL))
 	req, err := http.NewRequest("POST", url, bytes.NewReader(b))
 	req.Header.Add("Content-Type", "application/json; charset=utf-8")
 	client := &http.Client{}
